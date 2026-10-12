@@ -4,13 +4,26 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.8"
+anyhow = "1.0.104"
+async-openai = { version = "0.42", default-features = false, features = ["rustls", "chat-completion"] }
+async-trait = "0.1.92"
+axum = { version = "0.8", features = ["multipart"] }
+base64 = "0.23.1"
+chrono = { version = "0.4", features = ["serde"] }
+dotenvy = "0.15.7"
+hex = "0.4.3"
+libsql = { version = "0.9", default-features = false, features = ["core", "remote", "tls"] }
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.154"
+sha2 = "0.11.0"
+subtle = "2.6.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
-tower-http = { version = "0.6", features = ["cors", "trace"] }
+tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
+tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }

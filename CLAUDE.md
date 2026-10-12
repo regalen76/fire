@@ -29,10 +29,10 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 ## Architecture decisions (see README for the reasoning)
 
 - **No separate OCR.** The screenshot goes straight to a vision model on an **OpenAI-compatible** `chat/completions` endpoint (the user runs OpenCode models, not Claude/Anthropic). `FIRE_LLM_BASE_URL`, `FIRE_LLM_API_KEY` and `FIRE_LLM_MODEL` choose the provider, so never hard-code one. Start with `glm-5.3-flash` (vision). Plain `glm-5.3` is text-only. Send the image as a base64 data-URL `image_url` part and request `response_format` `json_schema` (strict). Always re-validate with serde, since compatible providers vary. `category` is an enum of the seeded category ids, so never let the model invent one.
-- **LLM client:** `async-openai` with a custom `api_base`, behind an `Extractor` trait in `llm.rs` (proposed; Rig is the alternative if agent features arrive).
+- **LLM client:** `async-openai` 0.42 (feature `chat-completion`) with a custom `api_base`, behind the `Extractor` trait in `llm.rs`. One retry with the validation error appended, then the receipt is `failed` (retry with `POST /api/receipts/:id/retry`). Rig is the alternative if agent features arrive.
 - **Async ingest.** `POST /api/receipts` stores the image and a `processing` receipt, returns `202 {id}`, then extracts in `tokio::spawn`. At startup, retry receipts still `processing`. Keep the raw LLM JSON on the receipt row.
 - **Turso via the `libsql` crate.** `TURSO_DATABASE_URL` is `libsql://…` remotely and `file:fire.db` locally. Migrations are `.sql` files in `backend/migrations/`, run at startup. Tests use an in-memory or temp-file DB, never the real Turso.
-- **Money is integer minor units** (`amount_minor: i64`) plus an ISO currency code. Expenses are negative, income positive, and `transfer` is left out of spending totals. Format money only in the frontend.
+- **Money is integer minor units** (`amount_minor: i64`) plus an ISO currency code. Sign follows direction: `out` < 0, `in` > 0, `internal` > 0 (excluded from totals). Requests take decimal strings parsed by `money::parse_minor`; responses return minor units. Format money only in the frontend (`frontend/src/format.ts`).
 - **Ingest auth:** `Authorization: Bearer $FIRE_INGEST_TOKEN`. Compare it in constant time and reject before reading the body.
 - **Money:** IDR mostly, with USD for PayPal and some purchases. Keep the original `amount_minor` + `currency`, and also store `amount_base_minor` + `fx_rate` in `FIRE_BASE_CURRENCY` (IDR). Totals and charts use the base amount only. `amount_minor` is ×100 for every currency. Show IDR without decimals (`Rp 25.000`). The model returns decimal strings, and Rust does the conversion.
 - **Direction:** every transaction is `in`, `out` or `internal`. Income mostly comes from screenshots of incoming transfers. `FIRE_OWNER_NAMES` tells the model which side of a transfer is the owner. `internal` (own-account moves) is left out of totals.
@@ -54,8 +54,11 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 
 ## Backend rules
 
-- Routes go in `app()` in `src/main.rs`. Split into modules (`routes/`, `db.rs`, `llm.rs`) as it grows. JSON fields are camelCase (`#[serde(rename_all = "camelCase")]`).
-- Keep `/api/health` working. Add a test per new route using `tower::ServiceExt::oneshot`.
+- Routes are registered in `app()` in `src/main.rs`; handlers live in `src/routes/*.rs`. The README lists every module. JSON fields are camelCase (`#[serde(rename_all = "camelCase")]`). Errors go through `error::ApiError`.
+- New schema changes are a new `migrations/000N_*.sql` file added to `MIGRATIONS` in `db.rs`. Never edit an applied migration.
+- Open a connection per request with `state.conn()`; wrap multi-statement writes in `conn.transaction()`.
+- No CORS layer, on purpose (no login). Don't add one.
+- Keep `/api/health` working. Add a test per new route using `tower::ServiceExt::oneshot`, with `state::test::state(...)` (temp DB, `FakeExtractor`, `FakeFx`). Receipt tests use the helpers in `routes::receipts::tests` (`upload_ok`, `wait_done`).
 - Put the LLM call behind a trait so tests can use a fake extractor. Tests must never call the real API.
 - Secrets come from env vars and are never committed (`.env` is git-ignored). Document each new var in the README's Configuration table.
 

@@ -2,7 +2,7 @@
 
 A personal finance app built around one gesture: **double-tap the back of the iPhone** while a bill, receipt or payment confirmation is on screen. Fire saves the merchant, line items, total and category, and the web app turns them into a financial report.
 
-> Status: scaffold. The backend serves `/api/health` and a placeholder `/api/summary`. The React app renders one card with the Design components. Everything under [Pipeline](#pipeline) is the agreed plan, not built yet.
+> Status: **backend built** (ingest pipeline, storage, every API route below). The React app is still a single overview card. Next: port the Dashboard, Transactions and Receipts screens from the prototype, then test real receipts against `glm-5.3-flash`.
 
 ## Decisions so far
 
@@ -96,13 +96,13 @@ The Shortcut should get an answer within about a second, but an LLM call takes s
 
 - Rust crate `libsql`. It connects to Turso remotely (`TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`) or to a local SQLite file in dev (`TURSO_DATABASE_URL=file:fire.db`).
 - Migrations are plain `.sql` files under `backend/migrations/`, applied at startup.
-- **Money is stored as integer minor units** (`amount_minor`, ×100 for every currency, so `Rp 25.000` → `2500000` and `$12.80` → `1280`) plus an ISO currency code. Floats are never used. Expenses are negative and income positive. IDR is displayed without decimals.
+- **Money is stored as integer minor units** (`amount_minor`, ×100 for every currency, so `Rp 25.000` → `2500000` and `$12.80` → `1280`) plus an ISO currency code. Floats are never used. The sign follows the direction: `out` is negative, `in` positive, and `internal` positive (unsigned, since it's excluded from totals). IDR is displayed without decimals.
 - **Multi-currency.** Every transaction also stores `amount_base_minor` in the base currency (`FIRE_BASE_CURRENCY=IDR`) and the `fx_rate` used, fixed at the time the transaction is saved. All totals, charts and budgets use the base amount. The original amount is shown next to it (e.g. `-Rp 205.000 · -$12.80`). Rate source, in order:
   1. the screenshot itself, if it shows a conversion (PayPal often does);
   2. the daily rate for the transaction date from a free FX API (e.g. [Frankfurter](https://frankfurter.dev), ECB data, includes IDR), cached in an `fx_rates` table.
 - Images go in a `BLOB` column for now: personal volume is small and it keeps everything in one place. They can move to object storage (R2/S3) later if size becomes a problem.
 
-Planned schema:
+Schema (`backend/migrations/0001_init.sql`):
 
 ```sql
 categories        (id TEXT PRIMARY KEY, label, icon, kind)            -- kind: expense|income|internal
@@ -144,11 +144,11 @@ Seeded from the design's mock data (`Design/ui_kits/finance-web/data.js`). The L
 | `bills` | Bills & Utilities | expense | `Domain` |
 | `subs` | Subscriptions | expense | `IONIconDDocumentsDefault` |
 | `shopping` | Shopping | expense | `IONIconCCardDefault` |
-| `health` | Health | expense | (to pick) |
-| `entertainment` | Entertainment | expense | (to pick) |
-| `other` | Other | expense | (to pick) |
+| `health` | Health | expense | `IONIconCCheckmarkCCircle` |
+| `entertainment` | Entertainment | expense | `TagFaces` |
+| `other` | Other | expense | `MoreHoriz` |
 | `salary` | Salary | income | `IONIconWWalletDefault` |
-| `income` | Other Income | income | (to pick) |
+| `income` | Other Income | income | `IONIconSStatsChart` |
 | `transfer` | Transfer | internal | `IONIconKKeyDefault` |
 
 `transfer` (direction `internal`) is left out of income and spending totals. `health`, `entertainment`, `other` and `income` are additions to the design's list. An outgoing transfer to another person is an expense, categorised by purpose (`other` if unknown).
@@ -158,38 +158,50 @@ Seeded from the design's mock data (`Design/ui_kits/finance-web/data.js`). The L
 | Method | Path | Status | Notes |
 |---|---|---|---|
 | GET | `/api/health` | built | `{"status":"ok"}` |
-| GET | `/api/summary` | placeholder | Hard-coded stat cards |
-| POST | `/api/receipts` | planned | Multipart `image`, bearer `FIRE_INGEST_TOKEN`, returns `202 {id}` |
-| GET | `/api/receipts` | planned | Queue and history |
-| GET | `/api/receipts/:id/image` | planned | Original screenshot |
-| GET | `/api/transactions` | planned | `?direction=in\|out&category=&currency=&from=&to=&limit=` |
-| POST | `/api/transactions` | planned | Manual entry |
-| GET/PATCH/DELETE | `/api/transactions/:id` | planned | PATCH for category/direction fixes |
-| GET/PUT | `/api/settings/budget` | planned | `{ "amountMinor": 500000000 }` or `null` to clear |
-| GET | `/api/cashflow` | planned | Monthly income/expense series in the base currency |
+| GET | `/api/categories` | built | `[{id, label, icon, kind}]` |
+| GET | `/api/summary` | built | `?month=YYYY-MM` (default this month). `incomeMinor`, `spendingMinor` (positive), `netMinor`, `transactionCount`, `receiptCount`, `previous` (same for last month), `byCategory`, `budgetMinor` (`null` if unset) |
+| GET | `/api/cashflow` | built | `?year=YYYY`. 12 `months` of `incomeMinor` / `spendingMinor` |
+| POST | `/api/receipts` | built | Multipart `image` (PNG/JPEG/WebP/GIF, max 25 MB), bearer `FIRE_INGEST_TOKEN`. `202 {id, status, message}`, `401` bad token, `409 {receiptId, message: "Already saved"}` identical image, `415` not an image or HEIC, `503` token or LLM not configured |
+| GET | `/api/receipts` | built | `?status=&limit=&offset=`. Newest first, each with its `transaction` summary (or `null`) |
+| GET | `/api/receipts/:id` | built | Same, plus `llmJson` (the raw model reply) |
+| GET | `/api/receipts/:id/image` | built | Original screenshot |
+| POST | `/api/receipts/:id/retry` | built | Re-run a `failed` receipt (`409` for any other status) |
+| DELETE | `/api/receipts/:id` | built | Deletes the receipt and its transaction |
+| GET | `/api/transactions` | built | `?direction=in\|out\|internal&category=&currency=&from=YYYY-MM-DD&to=YYYY-MM-DD&q=&limit=&offset=`. `{items, total}` |
+| POST | `/api/transactions` | built | Manual entry: `{direction, merchant, amount: "100.00", currency?, categoryId, occurredAt?, paymentMethod?, note?}`. `201` |
+| GET | `/api/transactions/:id` | built | Transaction plus `items` |
+| PATCH | `/api/transactions/:id` | built | `{categoryId?, direction?, merchant?, occurredAt?, note?}`. A direction change flips the sign and moves the category if it no longer fits |
+| DELETE | `/api/transactions/:id` | built | Also deletes its receipt, so the screenshot can be re-sent |
+| GET/PUT | `/api/settings/budget` | built | `GET → {amountMinor, currency}`. `PUT {"amount": "5000000"}` sets it, `{"amount": null}` clears it |
+
+Errors are `{"error": "..."}`. Amounts in requests are decimal strings (`"25000"`, `"Rp 25.000"`, `"12.80"`); amounts in responses are integer minor units. There is deliberately **no CORS** header: with no login, other websites open in the owner's browser must not be able to read the API.
 
 JSON fields are camelCase.
 
 ## Configuration
 
-All configuration comes from environment variables. Put them in `backend/.env` locally (git-ignored); never commit them.
+All configuration comes from environment variables. Locally, copy `backend/.env.example` to `backend/.env` (git-ignored; loaded at startup). On the server use real env vars (e.g. a systemd `EnvironmentFile`). Never commit secrets.
 
 | Var | Purpose | Default |
 |---|---|---|
 | `HOST` | Bind address. Keep it local; `tailscale serve` proxies to it | `127.0.0.1` |
 | `PORT` | HTTP port | `3000` |
 | `RUST_LOG` | Log filter | `info` |
-| `TURSO_DATABASE_URL` | `libsql://…turso.io` or `file:fire.db` | planned |
-| `TURSO_AUTH_TOKEN` | Turso token (remote only) | planned |
-| `FIRE_LLM_BASE_URL` | OpenAI-compatible base URL (the part before `/chat/completions`) | planned |
-| `FIRE_LLM_API_KEY` | API key for that provider | planned |
-| `FIRE_LLM_MODEL` | Vision-capable model id | `glm-5.3-flash` (planned) |
-| `FIRE_LLM_JSON_MODE` | `json_schema` or `json_object` | `json_schema` (planned) |
-| `FIRE_INGEST_TOKEN` | Shared secret the Shortcut sends | planned |
-| `FIRE_BASE_CURRENCY` | Currency for totals and reports | `IDR` (planned) |
-| `FIRE_DEFAULT_CURRENCY` | Assumed when the screenshot shows no currency symbol | `IDR` (planned) |
-| `FIRE_OWNER_NAMES` | Comma-separated names on the owner's accounts, used for transfer direction | planned |
-| `FIRE_STATIC_DIR` | Built frontend to serve (`frontend/dist`) | planned |
+| `TURSO_DATABASE_URL` | `libsql://…turso.io` or `file:fire.db` | `file:fire.db` |
+| `TURSO_AUTH_TOKEN` | Turso token (remote only) | |
+| `FIRE_LLM_BASE_URL` | OpenAI-compatible base URL (the part before `/chat/completions`) | |
+| `FIRE_LLM_API_KEY` | API key for that provider | |
+| `FIRE_LLM_MODEL` | Vision-capable model id, e.g. `glm-5.3-flash` | |
+| `FIRE_LLM_JSON_MODE` | `json_schema` or `json_object` | `json_schema` |
+| `FIRE_INGEST_TOKEN` | Shared secret the Shortcut sends (`openssl rand -hex 32`) | uploads disabled |
+| `FIRE_BASE_CURRENCY` | Currency for totals and reports | `IDR` |
+| `FIRE_DEFAULT_CURRENCY` | Assumed when the screenshot shows no currency symbol | `IDR` |
+| `FIRE_OWNER_NAMES` | Comma-separated names on the owner's accounts, used for transfer direction | |
+| `FIRE_UTC_OFFSET` | Owner's timezone; `occurredAt` is stored in this local time | `+07:00` |
+| `FIRE_FX_BASE_URL` | Frankfurter-compatible rates API | `https://api.frankfurter.dev/v1` |
+| `FIRE_STATIC_DIR` | Built frontend to serve (`../frontend/dist`) | not served |
+
+The three `FIRE_LLM_*` vars must be set together. If they are missing (or the token is), the server still runs and serves the web app, but uploads return `503`.
 
 ## Development
 
@@ -205,13 +217,30 @@ cd frontend && npm run dev                            # :5173, proxies /api → 
 cd frontend && npm run typecheck && npm run build
 ```
 
-To test ingestion without a phone (once the route exists):
+To test ingestion without a phone:
 
 ```bash
 curl -X POST localhost:3000/api/receipts \
   -H "Authorization: Bearer $FIRE_INGEST_TOKEN" \
   -F image=@receipt.png
+# then watch it: curl localhost:3000/api/receipts
 ```
+
+Backend layout (`backend/src/`):
+
+| File | What |
+|---|---|
+| `main.rs` | Router (`app()`), startup, resuming receipts left `processing` |
+| `config.rs` | Env vars → `Config` |
+| `db.rs` | libsql connection + migrations |
+| `llm.rs` | `Extractor` trait, OpenAI-compatible implementation, prompt, JSON schema, validation |
+| `ingest.rs` | Background pipeline: extract → normalise → duplicate check → FX → save |
+| `fx.rs` | Exchange rates (Frankfurter) cached in `fx_rates` |
+| `money.rs` | Decimal strings (incl. `Rp 1.250.000,50`) → minor units |
+| `store.rs` | Transaction rows and shared queries |
+| `routes/` | `receipts`, `transactions`, `reports` (summary, cashflow, categories), `settings` |
+
+Tests use a temp-file database, `FakeExtractor` and `FakeFx` (1 USD = 16,000 IDR), so they never touch the network.
 
 ## Deployment
 
