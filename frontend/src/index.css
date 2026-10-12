@@ -1,0 +1,2 @@
+html, body, #root { min-height: 100%; margin: 0; }
+body { color: var(--white); font-family: var(--font-sans); }
