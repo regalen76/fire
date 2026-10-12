@@ -44,14 +44,16 @@ Back Tap runs the shortcut on top of whatever app is open, so the screenshot sho
 
 | Option | What it does | Verdict |
 |---|---|---|
-| **Vision LLM (Claude) with structured output** | One call reads the image, extracts fields and picks a category from a fixed list | **Chosen.** Screenshots are clean digital text, which these models read reliably. One call replaces OCR, parsing and categorising. It copes with any layout or language (e.g. e-wallet and bank-app receipts) without per-merchant rules. |
+| **Vision LLM with structured output** | One call reads the image, extracts fields and picks a category from a fixed list | **Chosen.** Screenshots are clean digital text, which these models read reliably. One call replaces OCR, parsing and categorising. It copes with any layout or language (e.g. e-wallet and bank-app receipts) without per-merchant rules. |
 | OCR (Tesseract / cloud OCR) → LLM on text | Two stages | More moving parts. Layout is lost (which number is the total?) and it still needs an LLM to categorise. |
 | On-device OCR in the Shortcut ("Extract Text from Image") → send text | iPhone does OCR | Cheaper and the image never leaves the phone, but it loses layout and the original image for re-processing. A possible fallback mode. |
 | OCR + regex/rules only | No LLM | Brittle: every receipt format needs its own rules, and categorising stays manual. |
 
 Implementation notes:
-- Call the Claude Messages API (`POST https://api.anthropic.com/v1/messages`) from Rust over HTTP (`reqwest`). There is no official Rust SDK. Put the image in an `image` content block (base64) and constrain the reply with structured outputs (`output_config.format` with a JSON schema), so the backend always gets parseable JSON.
-- The model is set by env var `FIRE_LLM_MODEL`. The default is `claude-opus-5-5` (best accuracy, roughly $0.01–0.02 per receipt). `claude-haiku-5-5` is far cheaper and worth testing once there are sample receipts to compare against.
+- **Provider: any OpenAI-compatible endpoint** (OpenCode or anything else that speaks `POST {base}/chat/completions`). Three env vars choose it: `FIRE_LLM_BASE_URL`, `FIRE_LLM_API_KEY` and `FIRE_LLM_MODEL`. Changing provider or model is a config change, not a code change.
+- The model **must accept image input** (vision). The image goes in as an `image_url` content part holding a `data:image/png;base64,…` URL.
+- The output is constrained with `response_format: {type: "json_schema", strict: true}`. Not every OpenAI-compatible provider honours that, so the backend always validates the reply with serde anyway. If validation fails, it retries once with the error appended and then marks the receipt `failed`. `FIRE_LLM_JSON_MODE=json_object` falls back to plain JSON mode for providers without schema support.
+- **Client library (proposed): [`async-openai`](https://crates.io/crates/async-openai)** with a custom `api_base`, behind our own `Extractor` trait (`fn extract(&self, image: &[u8], mime: &str) -> Result<Extraction>`). It is a typed client for exactly this API with no extra layers, and it allows a fake extractor in tests. [Rig](https://rig.rs) is a reasonable alternative and becomes the better fit if Fire later grows agent features, such as a "chat with your spending" assistant with tools over the DB. For one image-in, JSON-out call it adds abstraction and a fast-moving API without much benefit. Because of the trait, switching later only touches `llm.rs`.
 - `category` is an **enum** in the schema (see [Categories](#categories)), so the model cannot invent new ones.
 - Keep the raw model JSON on the receipt row. A bad extraction can then be debugged or re-run without re-sending the image.
 - If the image isn't a bill (a random screenshot), the model returns `isReceipt: false` and the receipt is marked `rejected`.
@@ -138,8 +140,10 @@ All configuration comes from environment variables. Put them in `backend/.env` l
 | `RUST_LOG` | Log filter | `info` |
 | `TURSO_DATABASE_URL` | `libsql://…turso.io` or `file:fire.db` | planned |
 | `TURSO_AUTH_TOKEN` | Turso token (remote only) | planned |
-| `ANTHROPIC_API_KEY` | Claude API key | planned |
-| `FIRE_LLM_MODEL` | Extraction model | `claude-opus-5-5` (planned) |
+| `FIRE_LLM_BASE_URL` | OpenAI-compatible base URL (the part before `/chat/completions`) | planned |
+| `FIRE_LLM_API_KEY` | API key for that provider | planned |
+| `FIRE_LLM_MODEL` | Vision-capable model id | planned |
+| `FIRE_LLM_JSON_MODE` | `json_schema` or `json_object` | `json_schema` (planned) |
 | `FIRE_INGEST_TOKEN` | Shared secret the Shortcut sends | planned |
 | `FIRE_DEFAULT_CURRENCY` | Used when the receipt shows no currency | planned |
 
@@ -185,4 +189,5 @@ Design/     Vision Finance design system (generated; source of truth for UI)
 3. **Accounts.** How should a receipt map to an account? Options: the LLM reads the payment method or card last-4 and matches it to `accounts.last4`, a default account, or set by hand in the drawer.
 4. **Income.** Receipts are mostly expenses. Is income entered manually, read from screenshots of transfer confirmations or payslips, or imported from bank statements later?
 5. **Web auth.** The ingest endpoint uses a bearer token. The web app needs login too (single user: a password plus a session cookie is probably enough).
-6. **Duplicates.** Tapping twice on the same bill should not create two transactions. Proposed fix: hash the image and also match on merchant + total + time.
+6. **LLM model.** Which OpenCode model will be used, and does it accept images? Test a handful of real receipts before settling on one.
+7. **Duplicates.** Tapping twice on the same bill should not create two transactions. Proposed fix: hash the image and also match on merchant + total + time.

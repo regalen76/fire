@@ -28,7 +28,8 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 
 ## Architecture decisions (see README for the reasoning)
 
-- **No separate OCR.** The screenshot goes straight to the Claude Messages API as a base64 `image` block, with structured outputs (`output_config.format` JSON schema). Call it over raw HTTP with `reqwest`, since there is no official Rust SDK. The model comes from `FIRE_LLM_MODEL` (default `claude-opus-5-5`). `category` is an enum of the seeded category ids, so never let the model invent one.
+- **No separate OCR.** The screenshot goes straight to a vision model on an **OpenAI-compatible** `chat/completions` endpoint (the user runs OpenCode models, not Claude/Anthropic). `FIRE_LLM_BASE_URL`, `FIRE_LLM_API_KEY` and `FIRE_LLM_MODEL` choose the provider, so never hard-code one. Send the image as a base64 data-URL `image_url` part and request `response_format` `json_schema` (strict). Always re-validate with serde, since compatible providers vary. `category` is an enum of the seeded category ids, so never let the model invent one.
+- **LLM client:** `async-openai` with a custom `api_base`, behind an `Extractor` trait in `llm.rs` (proposed; Rig is the alternative if agent features arrive).
 - **Async ingest.** `POST /api/receipts` stores the image and a `processing` receipt, returns `202 {id}`, then extracts in `tokio::spawn`. At startup, retry receipts still `processing`. Keep the raw LLM JSON on the receipt row.
 - **Turso via the `libsql` crate.** `TURSO_DATABASE_URL` is `libsql://…` remotely and `file:fire.db` locally. Migrations are `.sql` files in `backend/migrations/`, run at startup. Tests use an in-memory or temp-file DB, never the real Turso.
 - **Money is integer minor units** (`amount_minor: i64`) plus an ISO currency code. Expenses are negative, income positive, and `transfer` is left out of spending totals. Format money only in the frontend.
