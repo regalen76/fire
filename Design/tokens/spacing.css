@@ -1,0 +1,24 @@
+:root{
+/* Spacing (observed in frames) */
+--space-1:4px;--space-2:8px;--space-3:12px;--space-4:16px;--space-5:20px;--space-6:22px;--space-7:24px;--space-8:28px;--space-9:31px;
+--gutter:24px;
+--sidebar-width:264px;
+--sidebar-width-collapsed:88px;
+--sidebar-inset:10px;
+--content-left:298px;
+/* Radii */
+--radius-xs:6px;--radius-sm:8px;--radius-md:12px;--radius-lg:15px;--radius-xl:20px;--radius-pill:999px;
+--radius-card:var(--radius-xl);
+--radius-button:var(--radius-md);
+--radius-input:var(--radius-lg);
+--radius-nav:var(--radius-lg);
+/* Effects */
+--shadow-tile:0px 3.5px 5.5px 0px rgba(0,0,0,0.02);
+--blur-card:blur(120px); /* @kind other */
+--blur-button:blur(10px); /* @kind other */
+/* Motion (sidebar collapse) */
+--ease-out:cubic-bezier(0.22,1,0.36,1); /* @kind other */
+--dur-fast:150ms; /* @kind other */
+--dur-base:250ms; /* @kind other */
+--dur-slow:350ms; /* @kind other */
+}

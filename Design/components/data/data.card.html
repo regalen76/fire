@@ -1,0 +1,16 @@
+<!-- @dsCard group="Components" viewport="700x560" name="Data" subtitle="StatCard, Balance, CreditCard, TransactionItem, InvoiceItem, MiniStat, AvatarsGroup" -->
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>components/data/data.card.html</title><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body{margin:0;background:var(--navy-900);color:#fff;font-family:var(--font-sans)}body{background:var(--gradient-app-bg);min-height:100vh}#root{padding:20px;box-sizing:border-box}</style></head><body><div id="root"></div>
+<script type="text/babel">
+const NS=window.VisionFinanceDesignSystem_6fe7b7;
+const {StatCard,Balance,CreditCard,TransactionItem,InvoiceItem,MiniStat,AvatarsGroup,Card}=NS;
+function App(){return (<div style={{display:'flex',flexDirection:'column',gap:16}}>
+<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><StatCard label="Today’s Money" value="$53,000" change="+55%" icon="IONIconWWalletDefault"/><StatCard label="New Clients" value="+3,052" change="-14%" icon="IONIconDDocumentText"/></div>
+<div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:16}}><CreditCard image="../../assets/images/credit-card-bg.jpg" style={{minHeight:200}}/><div style={{display:'flex',flexDirection:'column',gap:14}}><Balance amount="$25,215" graphSrc="../../assets/images/balance-graph.svg"/><div style={{display:'flex',gap:20,alignItems:'flex-end'}}><MiniStat label="Users" value="32,984" progress={60}/><MiniStat icon="IONIconCCartDefault" label="Sales" value="2,400$" progress={40}/><AvatarsGroup size={24} srcs={['../../assets/images/avatar-1.png','../../assets/images/avatar-2.png','../../assets/images/avatar-3.png','../../assets/images/avatar-4.png']}/></div></div></div>
+<Card padding="20px 22px" style={{display:'flex',flexDirection:'column',gap:14}}><TransactionItem title="Netflix" meta="27 March 2020, at 12:30 PM" amount="-$2500" type="expense" category="Subscriptions"/><TransactionItem title="Apple" meta="27 March 2020, at 12:30 PM" amount="+$2500" type="income"/><TransactionItem title="Webflow" meta="26 March 2020, at 05:00 AM" amount="Pending" type="pending"/><InvoiceItem date="March, 01, 2020" id="#MS-415646" amount="$180"/></Card>
+</div>);}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);</script></body></html>

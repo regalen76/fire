@@ -1,0 +1,2 @@
+/* App backdrop: source frames layer a blue abstract photo (assets/images/bg-dashboard.jpg) under the navy gradient. Exact opacity of that layer wasn't resolvable; 0.78 navy veil approximates the rendered frames. */
+.vf-app-bg{background:linear-gradient(rgba(6,11,38,0.78),rgba(6,11,38,0.78)),url("../assets/images/bg-dashboard.jpg") center/cover no-repeat fixed,var(--gradient-app-bg);background-color:var(--bg-app)}
