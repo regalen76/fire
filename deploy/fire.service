@@ -1,0 +1,40 @@
+# systemd unit for running Fire without Docker.
+#   sudo install -Dm755 backend/target/release/fire-backend /opt/fire/fire-backend
+#   sudo mkdir -p /opt/fire/dist && sudo cp -r frontend/dist/. /opt/fire/dist/
+#   sudo install -Dm600 backend/.env.example /etc/fire/fire.env   # then edit it
+#   sudo cp deploy/fire.service /etc/systemd/system/ && sudo systemctl enable --now fire
+#   tailscale serve --bg 3000
+[Unit]
+Description=Fire personal finance
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+# Defaults for this layout. Values in the env file win over these (systemd reads
+# EnvironmentFile= last), so leave FIRE_STATIC_DIR unset there. A relative
+# `TURSO_DATABASE_URL=file:fire.db` lands in the state directory, /var/lib/fire.
+Environment=HOST=127.0.0.1
+Environment=FIRE_STATIC_DIR=/opt/fire/dist
+EnvironmentFile=/etc/fire/fire.env
+ExecStart=/opt/fire/fire-backend
+DynamicUser=yes
+StateDirectory=fire
+WorkingDirectory=/var/lib/fire
+Restart=on-failure
+RestartSec=5
+
+# Hardening: the service only needs its state directory and the network.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
