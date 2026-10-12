@@ -187,7 +187,7 @@ All configuration comes from environment variables. Locally, copy `backend/.env.
 | `HOST` | Bind address. Keep it local; `tailscale serve` proxies to it | `127.0.0.1` |
 | `PORT` | HTTP port | `3000` |
 | `RUST_LOG` | Log filter | `info` |
-| `TURSO_DATABASE_URL` | `libsql://…turso.io` or `file:fire.db` | `file:fire.db` |
+| `TURSO_DATABASE_URL` | `file:fire.db` (local file, use an absolute path on the server), `libsql://…turso.io` (Turso cloud) or `http://127.0.0.1:8080` (`turso dev`, no token) | `file:fire.db` |
 | `TURSO_AUTH_TOKEN` | Turso token (remote only) | |
 | `FIRE_LLM_BASE_URL` | OpenAI-compatible base URL (the part before `/chat/completions`) | |
 | `FIRE_LLM_API_KEY` | API key for that provider | |

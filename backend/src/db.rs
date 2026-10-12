@@ -15,6 +15,10 @@ pub async fn open(cfg: &Config) -> anyhow::Result<Database> {
             .clone()
             .ok_or_else(|| anyhow::anyhow!("TURSO_AUTH_TOKEN is required for {url}"))?;
         Builder::new_remote(url.to_string(), token).build().await?
+    } else if url.starts_with("http://") {
+        // A local libSQL server (`turso dev`), which needs no token.
+        let token = cfg.database_token.clone().unwrap_or_default();
+        Builder::new_remote(url.to_string(), token).build().await?
     } else {
         let path = url.strip_prefix("file:").unwrap_or(url);
         let db = Builder::new_local(path).build().await?;
