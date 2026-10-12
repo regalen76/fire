@@ -2,7 +2,18 @@
 
 A personal finance app built around one gesture: **double-tap the back of the iPhone** while a bill, receipt or payment confirmation is on screen. Fire saves the merchant, line items, total and category, and the web app turns them into a financial report.
 
-> Status: scaffold. The backend serves `/api/health` and a placeholder `/api/summary`. The React app renders one card with the Design components. Everything under [Pipeline](#pipeline) is the agreed plan, not built yet. [Open questions](#open-questions) lists what still needs a decision.
+> Status: scaffold. The backend serves `/api/health` and a placeholder `/api/summary`. The React app renders one card with the Design components. Everything under [Pipeline](#pipeline) is the agreed plan, not built yet.
+
+## Decisions so far
+
+| Topic | Decision |
+|---|---|
+| Extraction | Vision LLM reads the screenshot directly (no OCR step) through an OpenAI-compatible endpoint. Starting model is `glm-5.3-flash`. |
+| Currency | Mostly **IDR** (bank). **USD** for PayPal and some purchases. Each transaction keeps its original currency, and reports are totalled in IDR. |
+| Income | Mainly from **screenshots of incoming transfers**. Manual entry is also possible. |
+| Users / login | **None.** Single owner, no login or register. The web app must therefore not be public (see [Deployment](#deployment)). |
+| Bank accounts | **Not modelled yet.** No accounts table and no Accounts screen. The LLM records a free-text `paymentMethod` (e.g. "BCA", "GoPay", "PayPal") so accounts can be added later. |
+| Hosting | The owner's own server. |
 
 ## Pipeline
 
@@ -17,8 +28,9 @@ Back Tap (double)
                               ◀── 202 { id }
        3. Show notification       background task:
                                     vision LLM: image → JSON
-                                    (merchant, date, total, currency,
-                                     items[], category, payment hint)
+                                    (direction, merchant/counterparty, date,
+                                     total, currency, items[], category,
+                                     paymentMethod)
                                     validate + save                        ──▶ transactions,
                                     status=done | failed                         transaction_items
 Web app (React)  ── GET /api/* ──▶ read and aggregate                       ◀── queries
@@ -40,7 +52,7 @@ Back Tap runs the shortcut on top of whatever app is open, so the screenshot sho
 
 ### 2. Extraction: vision LLM, no separate OCR step
 
-**Decision (proposed): send the image directly to a vision-capable LLM and get structured JSON back.** A classic OCR stage is skipped.
+**Decision: send the image directly to a vision-capable LLM and get structured JSON back.** A classic OCR stage is skipped.
 
 | Option | What it does | Verdict |
 |---|---|---|
@@ -56,7 +68,20 @@ Implementation notes:
 - **Client library (proposed): [`async-openai`](https://crates.io/crates/async-openai)** with a custom `api_base`, behind our own `Extractor` trait (`fn extract(&self, image: &[u8], mime: &str) -> Result<Extraction>`). It is a typed client for exactly this API with no extra layers, and it allows a fake extractor in tests. [Rig](https://rig.rs) is a reasonable alternative and becomes the better fit if Fire later grows agent features, such as a "chat with your spending" assistant with tools over the DB. For one image-in, JSON-out call it adds abstraction and a fast-moving API without much benefit. Because of the trait, switching later only touches `llm.rs`.
 - `category` is an **enum** in the schema (see [Categories](#categories)), so the model cannot invent new ones.
 - Keep the raw model JSON on the receipt row. A bad extraction can then be debugged or re-run without re-sending the image.
-- If the image isn't a bill (a random screenshot), the model returns `isReceipt: false` and the receipt is marked `rejected`.
+- If the image isn't a bill or transfer (a random screenshot), the model returns `isReceipt: false` and the receipt is marked `rejected`.
+- **Indonesian number formats.** `Rp 25.000` means twenty-five thousand (`.` separates thousands, `,` marks decimals). The prompt says so explicitly, and the model returns amounts as decimal strings (`"25000.00"`) that the backend converts to integers. The model never does that maths itself.
+
+### Expenses, income and transfers
+
+The same shortcut handles purchase receipts and bank or e-wallet transfer confirmations (e.g. "Transfer Berhasil"). The model returns a `direction`:
+
+| `direction` | Meaning | Sign | Example |
+|---|---|---|---|
+| `out` | Money left the owner | negative | Restaurant bill, QRIS payment, transfer to someone else |
+| `in` | Money came to the owner | positive | Salary or client payment received |
+| `internal` | Between the owner's own accounts | excluded from totals | BCA → GoPay top-up, PayPal → bank withdrawal |
+
+A transfer screenshot looks the same whether the owner sent or received it, so the prompt includes the owner's names as they appear on bank and e-wallet accounts (`FIRE_OWNER_NAMES`). If the owner is the recipient, the direction is `in`. If both sides are the owner, it is `internal`. Income is usually a salary or a client payment, so incoming transfers default to `income` and are fixed in the drawer when needed.
 
 ### 3. Processing model: async
 
@@ -66,20 +91,24 @@ The Shortcut should get an answer within about a second, but an LLM call takes s
 
 - Rust crate `libsql`. It connects to Turso remotely (`TURSO_DATABASE_URL` + `TURSO_AUTH_TOKEN`) or to a local SQLite file in dev (`TURSO_DATABASE_URL=file:fire.db`).
 - Migrations are plain `.sql` files under `backend/migrations/`, applied at startup.
-- **Money is stored as integer minor units** (`amount_minor`) plus an ISO currency code. Floats are never used. Expenses are negative and income positive.
+- **Money is stored as integer minor units** (`amount_minor`, ×100 for every currency, so `Rp 25.000` → `2500000` and `$12.80` → `1280`) plus an ISO currency code. Floats are never used. Expenses are negative and income positive. IDR is displayed without decimals.
+- **Multi-currency.** Every transaction also stores `amount_base_minor` in the base currency (`FIRE_BASE_CURRENCY=IDR`) and the `fx_rate` used, fixed at the time the transaction is saved. All totals, charts and budgets use the base amount. The original amount is shown next to it (e.g. `-Rp 205.000 · -$12.80`). Rate source, in order:
+  1. the screenshot itself, if it shows a conversion (PayPal often does);
+  2. the daily rate for the transaction date from a free FX API (e.g. [Frankfurter](https://frankfurter.dev), ECB data, includes IDR), cached in an `fx_rates` table.
 - Images go in a `BLOB` column for now: personal volume is small and it keeps everything in one place. They can move to object storage (R2/S3) later if size becomes a problem.
 
 Planned schema:
 
 ```sql
-accounts          (id, name, bank, type, last4, currency, created_at)
-categories        (id TEXT PRIMARY KEY, label, icon, kind)            -- kind: expense|income|transfer
-receipts          (id, status, image BLOB, mime, llm_json, error,     -- status: processing|done|failed|rejected
-                   created_at, processed_at)
-transactions      (id, receipt_id NULL, account_id NULL, category_id,
+categories        (id TEXT PRIMARY KEY, label, icon, kind)            -- kind: expense|income|internal
+receipts          (id, status, image BLOB, mime, image_sha256 UNIQUE, -- status: processing|done|failed|rejected
+                   llm_model, llm_json, error, created_at, processed_at)
+transactions      (id, receipt_id NULL, category_id, direction,       -- direction: in|out|internal
                    merchant, occurred_at, amount_minor, currency,
-                   source, note, created_at)                          -- source: receipt|manual|bank
+                   amount_base_minor, fx_rate, payment_method NULL,
+                   source, note, created_at)                          -- source: receipt|manual
 transaction_items (id, transaction_id, name, quantity, amount_minor)
+fx_rates          (date, currency, rate_to_base, PRIMARY KEY (date, currency))
 ```
 
 ### 5. Web app
@@ -88,11 +117,13 @@ Built with the Vision Finance design system in `Design/`. The click-through prot
 
 | Screen | Content | Main API |
 |---|---|---|
-| Dashboard | KPI stat cards (balance, month income, month spending, receipts scanned), welcome card, monthly budget gauge, cash-flow line chart, spending-by-category bars, recent transactions, balances by account | `GET /api/summary`, `/api/cashflow`, `/api/transactions?limit=5` |
+| Dashboard | KPI stat cards (month net, month income, month spending, receipts scanned), welcome card, monthly budget gauge, cash-flow line chart, spending-by-category bars, recent transactions. The "balances by account" card is left out until accounts exist. | `GET /api/summary`, `/api/cashflow`, `/api/transactions?limit=5` |
 | Transactions | Table filterable by All / Income / Outcome and by category | `GET /api/transactions` |
-| Accounts | Card visual, balance, linked accounts, per-account activity | `GET /api/accounts`, `/api/transactions?account=` |
+| Accounts | **Deferred** (no accounts yet). The sidebar item is hidden. | |
 | Receipts | Processing queue (live), scanned history, "How it works" | `GET /api/receipts` |
-| Transaction drawer | Detail with items read from the receipt, edit category, delete | `GET/PATCH/DELETE /api/transactions/:id` |
+| Transaction drawer | Detail with items read from the receipt, original screenshot, edit category/direction, delete | `GET/PATCH/DELETE /api/transactions/:id` |
+| Add transaction | Manual entry (mainly income without a screenshot) | `POST /api/transactions` |
+| Shell | Sidebar + header as in the prototype, but with no sign-in screen and no user/profile items | |
 
 ## Categories
 
@@ -110,9 +141,10 @@ Seeded from the design's mock data (`Design/ui_kits/finance-web/data.js`). The L
 | `entertainment` | Entertainment | expense | (to pick) |
 | `other` | Other | expense | (to pick) |
 | `salary` | Salary | income | `IONIconWWalletDefault` |
-| `transfer` | Transfer | transfer | `IONIconKKeyDefault` |
+| `income` | Other Income | income | (to pick) |
+| `transfer` | Transfer | internal | `IONIconKKeyDefault` |
 
-`transfer` is left out of spending totals. `health`, `entertainment` and `other` are additions to the design's list.
+`transfer` (direction `internal`) is left out of income and spending totals. `health`, `entertainment`, `other` and `income` are additions to the design's list. An outgoing transfer to another person is an expense, categorised by purpose (`other` if unknown).
 
 ## API
 
@@ -123,10 +155,10 @@ Seeded from the design's mock data (`Design/ui_kits/finance-web/data.js`). The L
 | POST | `/api/receipts` | planned | Multipart `image`, bearer `FIRE_INGEST_TOKEN`, returns `202 {id}` |
 | GET | `/api/receipts` | planned | Queue and history |
 | GET | `/api/receipts/:id/image` | planned | Original screenshot |
-| GET | `/api/transactions` | planned | `?type=in\|out&category=&account=&from=&to=&limit=` |
-| GET/PATCH/DELETE | `/api/transactions/:id` | planned | PATCH for category/account fixes |
-| GET | `/api/accounts` | planned | With computed balances |
-| GET | `/api/cashflow` | planned | Monthly income/expense series |
+| GET | `/api/transactions` | planned | `?direction=in\|out&category=&currency=&from=&to=&limit=` |
+| POST | `/api/transactions` | planned | Manual entry |
+| GET/PATCH/DELETE | `/api/transactions/:id` | planned | PATCH for category/direction fixes |
+| GET | `/api/cashflow` | planned | Monthly income/expense series in the base currency |
 
 JSON fields are camelCase.
 
@@ -145,7 +177,10 @@ All configuration comes from environment variables. Put them in `backend/.env` l
 | `FIRE_LLM_MODEL` | Vision-capable model id | `glm-5.3-flash` (planned) |
 | `FIRE_LLM_JSON_MODE` | `json_schema` or `json_object` | `json_schema` (planned) |
 | `FIRE_INGEST_TOKEN` | Shared secret the Shortcut sends | planned |
-| `FIRE_DEFAULT_CURRENCY` | Used when the receipt shows no currency | planned |
+| `FIRE_BASE_CURRENCY` | Currency for totals and reports | `IDR` (planned) |
+| `FIRE_DEFAULT_CURRENCY` | Assumed when the screenshot shows no currency symbol | `IDR` (planned) |
+| `FIRE_OWNER_NAMES` | Comma-separated names on the owner's accounts, used for transfer direction | planned |
+| `FIRE_STATIC_DIR` | Built frontend to serve (`frontend/dist`) | planned |
 
 ## Development
 
@@ -169,6 +204,14 @@ curl -X POST localhost:3000/api/receipts \
   -F image=@receipt.png
 ```
 
+## Deployment
+
+Fire runs on the owner's own server as **one process**. The Rust binary serves `/api/*` plus the built frontend (`FIRE_STATIC_DIR`). The plan is a systemd service or a small Docker image.
+
+- **HTTPS is required** for the iPhone Shortcut. Either put [Caddy](https://caddyserver.com) in front (automatic Let's Encrypt certificate, needs a domain pointing at the server and ports 80/443 open) or use a Cloudflare Tunnel (no open ports).
+- **There is no login, so the web app and read API must not be public.** Only `POST /api/receipts` has to be reachable from the internet, and it is protected by `FIRE_INGEST_TOKEN`. Expose that one route publicly, and keep everything else on the home network, a VPN such as Tailscale, or behind Caddy `basic_auth` / Cloudflare Access. The simplest setup is Tailscale on both the phone and the server, with nothing public at all.
+- Turso can stay remote (managed) or be replaced by a local `file:` database on the server. Either works with the same code.
+
 ## Repository layout
 
 ```
@@ -184,10 +227,6 @@ Design/     Vision Finance design system (generated; source of truth for UI)
 
 ## Open questions
 
-1. **Hosting.** The Shortcut needs public HTTPS. Options are a small VPS or PaaS (Fly.io, Railway, Render) or a Cloudflare Tunnel to a home machine. The frontend can be served by the backend or hosted separately.
-2. **Currency.** The design shows `$`. Which currency or currencies will the receipts be in? This decides `FIRE_DEFAULT_CURRENCY` and money formatting (e.g. IDR has no minor unit in practice).
-3. **Accounts.** How should a receipt map to an account? Options: the LLM reads the payment method or card last-4 and matches it to `accounts.last4`, a default account, or set by hand in the drawer.
-4. **Income.** Receipts are mostly expenses. Is income entered manually, read from screenshots of transfer confirmations or payslips, or imported from bank statements later?
-5. **Web auth.** The ingest endpoint uses a bearer token. The web app needs login too (single user: a password plus a session cookie is probably enough).
-6. **LLM model.** Start with `glm-5.3-flash`. Compare it with the Qwen vision models on 10–20 real receipts (merchant, total and category correct?) before settling on one.
-7. **Duplicates.** Tapping twice on the same bill should not create two transactions. Proposed fix: hash the image and also match on merchant + total + time.
+1. **LLM model.** Start with `glm-5.3-flash`. Compare it with the Qwen vision models on 10–20 real receipts and transfers (merchant, total, direction, category, IDR amounts parsed correctly?) before settling on one.
+2. **Duplicates.** Tapping twice on the same bill should not create two transactions. Plan: reject an identical image (`image_sha256`). If a different screenshot has the same merchant, total and time within a few minutes, flag it as a possible duplicate instead of saving it silently.
+3. **Monthly budget.** The dashboard gauge needs a budget. Start with one env var or settings row in IDR, or drop the card?

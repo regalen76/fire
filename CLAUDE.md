@@ -1,6 +1,6 @@
 # Fire
 
-Personal finance web app. An iPhone Shortcut (on Back Tap) screenshots a bill and POSTs it to the backend. A vision LLM extracts merchant, line items, total and category, and the result is saved in Turso. The web app shows history, spending, income, categories and accounts.
+Personal finance web app. An iPhone Shortcut (on Back Tap) screenshots a bill and POSTs it to the backend. A vision LLM extracts merchant, line items, total and category, and the result is saved in Turso. The web app shows history, spending, income and categories (IDR first, USD supported).
 
 `README.md` holds the full pipeline, the planned schema, the API table, env vars and open questions. Keep it in sync when any of these change (mark API rows `built` as they land).
 
@@ -34,12 +34,15 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 - **Turso via the `libsql` crate.** `TURSO_DATABASE_URL` is `libsql://…` remotely and `file:fire.db` locally. Migrations are `.sql` files in `backend/migrations/`, run at startup. Tests use an in-memory or temp-file DB, never the real Turso.
 - **Money is integer minor units** (`amount_minor: i64`) plus an ISO currency code. Expenses are negative, income positive, and `transfer` is left out of spending totals. Format money only in the frontend.
 - **Ingest auth:** `Authorization: Bearer $FIRE_INGEST_TOKEN`. Compare it in constant time and reject before reading the body.
-- Categories come from `Design/ui_kits/finance-web/data.js` (`food, groceries, transport, bills, subs, shopping, salary, transfer`) plus `health, entertainment, other`. The README has the table with icons.
+- **Money:** IDR mostly, with USD for PayPal and some purchases. Keep the original `amount_minor` + `currency`, and also store `amount_base_minor` + `fx_rate` in `FIRE_BASE_CURRENCY` (IDR). Totals and charts use the base amount only. `amount_minor` is ×100 for every currency. Show IDR without decimals (`Rp 25.000`). The model returns decimal strings, and Rust does the conversion.
+- **Direction:** every transaction is `in`, `out` or `internal`. Income mostly comes from screenshots of incoming transfers. `FIRE_OWNER_NAMES` tells the model which side of a transfer is the owner. `internal` (own-account moves) is left out of totals.
+- **No users, no login, no bank accounts (for now).** Don't add auth screens, a users table or an accounts table unless asked. Skip the prototype's SignIn/Profile/Accounts screens and the account fields. Keep the LLM's free-text `paymentMethod`. Because there is no login, only `POST /api/receipts` (token-protected) is meant to be internet-facing. Never assume the web app is public.
+- Categories come from `Design/ui_kits/finance-web/data.js` (`food, groceries, transport, bills, subs, shopping, salary, transfer`) plus `health, entertainment, other, income`. The README has the table with icons.
 
 ## Frontend rules
 
 - Use Design components and don't rebuild them: `import { Card } from '@design/components/core/Card'` (no extension; the `.d.ts` next to each `.jsx` gives the types). Each component has a `.prompt.md` with usage notes.
-- The screens to build already exist as a prototype in `Design/ui_kits/finance-web/` (Dashboard, Transactions, Accounts, Receipts, TransactionDrawer, Shell, SignIn). Port their layout and composition into typed React. Replace `window.FIN_DATA` with API calls and `window.VisionFinanceDesignSystem_*` with `@design/...` imports.
+- The screens to build already exist as a prototype in `Design/ui_kits/finance-web/` (Dashboard, Transactions, Receipts, TransactionDrawer, Shell). Accounts and SignIn are out of scope for now. Port their layout and composition into typed React. Replace `window.FIN_DATA` with API calls and `window.VisionFinanceDesignSystem_*` with `@design/...` imports.
 - Use the CSS tokens in `Design/tokens/*.css` (`var(--blue-500)`, `var(--radius-card)`, `var(--font-sans)`); never hard-code colours. Semantic aliases exist: `--income`, `--expense`, `--text-secondary`, `--gradient-row`, `--gradient-card`, `--surface-ghost`.
 - Motion: follow `Design/guidelines/motion.html`. Use `--ease-out` `cubic-bezier(0.22,1,0.36,1)`, with `--dur-fast/base/slow` = 150/250/350ms. Keep it short and subtle: no bounce, no press shrink. Hover means brightness 1.12 or a 2px icon nudge.
 - Look: cards are glass gradients with no borders and no shadows, radius tokens `--radius-card` 20, `--radius-input`/`--radius-nav` 15, `--radius-button` 12, `--radius-sm` 8 (chips). Dividers are 0.5px `var(--navy-400)`. The sidebar floats 10px from the edge, 264px wide, collapsing to 88px.
