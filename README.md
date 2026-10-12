@@ -13,7 +13,7 @@ A personal finance app built around one gesture: **double-tap the back of the iP
 | Income | Mainly from **screenshots of incoming transfers**. Manual entry is also possible. |
 | Users / login | **None.** Single owner, no login or register. The web app must therefore not be public (see [Deployment](#deployment)). |
 | Bank accounts | **Not modelled yet.** No accounts table and no Accounts screen. The LLM records a free-text `paymentMethod` (e.g. "BCA", "GoPay", "PayPal") so accounts can be added later. |
-| Hosting | The owner's own server. |
+| Hosting | The owner's own server, reachable **only over Tailscale**. Nothing is exposed to the public internet. |
 
 ## Pipeline
 
@@ -41,14 +41,14 @@ Web app (React)  ── GET /api/* ──▶ read and aggregate                 
 1. In **Shortcuts**, create a shortcut named "Send to Fire":
    - **Take Screenshot**
    - **Get Contents of URL**
-     - URL: `https://<your-host>/api/receipts`
+     - URL: `https://<server>.<tailnet>.ts.net/api/receipts`
      - Method: `POST`
      - Headers: `Authorization: Bearer <FIRE_INGEST_TOKEN>`
      - Request Body: `Form`, with a field `image` (type File) set to the screenshot
    - **Show Notification** with the response (e.g. "Receipt received").
 2. Go to **Settings → Accessibility → Touch → Back Tap → Double Tap** and choose "Send to Fire".
 
-Back Tap runs the shortcut on top of whatever app is open, so the screenshot shows the bill itself. The endpoint must be public **HTTPS**, because iOS blocks plain HTTP.
+Back Tap runs the shortcut on top of whatever app is open, so the screenshot shows the bill itself. The phone must be connected to Tailscale when the shortcut runs. Turn on the Tailscale app's **VPN On Demand** (or keep it always connected) so a Back Tap never fails silently. If the upload can't reach the server, the Shortcut shows an error notification; Shortcuts has no offline retry queue.
 
 ### 2. Extraction: vision LLM, no separate OCR step
 
@@ -168,6 +168,7 @@ All configuration comes from environment variables. Put them in `backend/.env` l
 
 | Var | Purpose | Default |
 |---|---|---|
+| `HOST` | Bind address. Keep it local; `tailscale serve` proxies to it | `127.0.0.1` |
 | `PORT` | HTTP port | `3000` |
 | `RUST_LOG` | Log filter | `info` |
 | `TURSO_DATABASE_URL` | `libsql://…turso.io` or `file:fire.db` | planned |
@@ -208,8 +209,9 @@ curl -X POST localhost:3000/api/receipts \
 
 Fire runs on the owner's own server as **one process**. The Rust binary serves `/api/*` plus the built frontend (`FIRE_STATIC_DIR`). The plan is a systemd service or a small Docker image.
 
-- **HTTPS is required** for the iPhone Shortcut. Either put [Caddy](https://caddyserver.com) in front (automatic Let's Encrypt certificate, needs a domain pointing at the server and ports 80/443 open) or use a Cloudflare Tunnel (no open ports).
-- **There is no login, so the web app and read API must not be public.** Only `POST /api/receipts` has to be reachable from the internet, and it is protected by `FIRE_INGEST_TOKEN`. Expose that one route publicly, and keep everything else on the home network, a VPN such as Tailscale, or behind Caddy `basic_auth` / Cloudflare Access. The simplest setup is Tailscale on both the phone and the server, with nothing public at all.
+- **Network: Tailscale only.** The server and the iPhone are on the owner's tailnet, and Fire binds to the Tailscale interface or localhost, never to a public IP. There is no login, so the network is the access control.
+- **HTTPS via `tailscale serve`.** Run `tailscale serve --bg 3000` on the server. This proxies `https://<server>.<tailnet>.ts.net` to Fire with an automatic certificate (enable MagicDNS + HTTPS certificates in the Tailscale admin console). No Caddy, domain or open ports are needed. Do **not** use `tailscale funnel`, which would make it public.
+- `FIRE_INGEST_TOKEN` stays on `POST /api/receipts` as a second layer, so any device on the tailnet can't write by accident. Read routes need no token.
 - Turso can stay remote (managed) or be replaced by a local `file:` database on the server. Either works with the same code.
 
 ## Repository layout

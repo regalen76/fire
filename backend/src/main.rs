@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
@@ -67,7 +67,12 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .unwrap_or(3000);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // Localhost by default: `tailscale serve` proxies the tailnet to it, and nothing should be public.
+    let host: IpAddr = std::env::var("HOST")
+        .ok()
+        .and_then(|h| h.parse().ok())
+        .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    let addr = SocketAddr::new(host, port);
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     tracing::info!("listening on {addr}");
     axum::serve(listener, app()).await.unwrap();
