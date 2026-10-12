@@ -38,6 +38,7 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 - **Direction:** every transaction is `in`, `out` or `internal`. Income mostly comes from screenshots of incoming transfers. `FIRE_OWNER_NAMES` tells the model which side of a transfer is the owner. `internal` (own-account moves) is left out of totals.
 - **No users, no login, no bank accounts (for now).** Don't add auth screens, a users table or an accounts table unless asked. Skip the prototype's SignIn/Profile/Accounts screens and the account fields. Keep the LLM's free-text `paymentMethod`. Access control is the network: the server is reachable **only over Tailscale** (`tailscale serve` for HTTPS, never `funnel`). Bind to localhost/Tailscale, not `0.0.0.0` on a public interface. `POST /api/receipts` still requires `FIRE_INGEST_TOKEN`.
 - **Duplicates are rejected, never saved twice:** an identical image (`image_sha256`) gets `409` before the LLM runs. A different screenshot of the same bill (same direction, currency and amount, similar merchant, within 10 min) gets receipt status `duplicate` + `duplicate_of`, and no transaction.
+- **Monthly budget is optional:** one IDR limit in the `settings` table, set from the web app (not an env var). With no budget, the gauge card shows an empty state. Never treat a missing budget as 0.
 - Categories come from `Design/ui_kits/finance-web/data.js` (`food, groceries, transport, bills, subs, shopping, salary, transfer`) plus `health, entertainment, other, income`. The README has the table with icons.
 
 ## Frontend rules

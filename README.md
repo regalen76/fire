@@ -13,6 +13,7 @@ A personal finance app built around one gesture: **double-tap the back of the iP
 | Income | Mainly from **screenshots of incoming transfers**. Manual entry is also possible. |
 | Users / login | **None.** Single owner, no login or register. The web app must therefore not be public (see [Deployment](#deployment)). |
 | Bank accounts | **Not modelled yet.** No accounts table and no Accounts screen. The LLM records a free-text `paymentMethod` (e.g. "BCA", "GoPay", "PayPal") so accounts can be added later. |
+| Monthly budget | Optional. One monthly spending limit in IDR, set from the web app. Until it's set, the gauge card shows an empty state. |
 | Hosting | The owner's own server, reachable **only over Tailscale**. Nothing is exposed to the public internet. |
 
 ## Pipeline
@@ -113,6 +114,7 @@ transactions      (id, receipt_id NULL, category_id, direction,       -- directi
                    source, note, created_at)                          -- source: receipt|manual
 transaction_items (id, transaction_id, name, quantity, amount_minor)
 fx_rates          (date, currency, rate_to_base, PRIMARY KEY (date, currency))
+settings          (key TEXT PRIMARY KEY, value TEXT)                  -- e.g. monthly_budget_minor (IDR ×100); absent = no budget
 ```
 
 ### 5. Web app
@@ -125,6 +127,7 @@ Built with the Vision Finance design system in `Design/`. The click-through prot
 | Transactions | Table filterable by All / Income / Outcome and by category | `GET /api/transactions` |
 | Accounts | **Deferred** (no accounts yet). The sidebar item is hidden. | |
 | Receipts | Processing queue (live), scanned history, "How it works" | `GET /api/receipts` |
+| Monthly budget card (on Dashboard) | Gauge of this month's spending (base currency, `out` only) against the budget. With no budget set it shows "No budget set" and a SET BUDGET button. Editing happens inline in the card. | `GET/PUT /api/settings/budget` |
 | Transaction drawer | Detail with items read from the receipt, original screenshot, edit category/direction, delete | `GET/PATCH/DELETE /api/transactions/:id` |
 | Add transaction | Manual entry (mainly income without a screenshot) | `POST /api/transactions` |
 | Shell | Sidebar + header as in the prototype, but with no sign-in screen and no user/profile items | |
@@ -162,6 +165,7 @@ Seeded from the design's mock data (`Design/ui_kits/finance-web/data.js`). The L
 | GET | `/api/transactions` | planned | `?direction=in\|out&category=&currency=&from=&to=&limit=` |
 | POST | `/api/transactions` | planned | Manual entry |
 | GET/PATCH/DELETE | `/api/transactions/:id` | planned | PATCH for category/direction fixes |
+| GET/PUT | `/api/settings/budget` | planned | `{ "amountMinor": 500000000 }` or `null` to clear |
 | GET | `/api/cashflow` | planned | Monthly income/expense series in the base currency |
 
 JSON fields are camelCase.
@@ -234,4 +238,3 @@ Design/     Vision Finance design system (generated; source of truth for UI)
 ## Open questions
 
 1. **LLM model.** Start with `glm-5.3-flash`. Compare it with the Qwen vision models on 10–20 real receipts and transfers (merchant, total, direction, category, IDR amounts parsed correctly?) before settling on one.
-2. **Monthly budget.** The prototype dashboard has a "Monthly budget" card: a semicircle meter showing how much of a monthly spending limit is used (e.g. "Rp 3.100.000 of Rp 5.000.000, 62%"). Keep it with one IDR budget setting, or drop the card?
