@@ -430,6 +430,31 @@ pub(crate) mod tests {
         assert!(r["llmJson"].as_str().unwrap().contains("Kopi Kenangan"));
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_uploads_all_save() {
+        let mut results = Vec::new();
+        for i in 0..6 {
+            let mut e = fake::coffee();
+            e.merchant = format!("Shop {i}");
+            e.total = format!("{}", 10_000 + i * 1_000);
+            results.push(Ok(e));
+        }
+        let (state, _dir) = test::state(results).await;
+        let mut ids = Vec::new();
+        for i in 0..6u8 {
+            let res = app(state.clone())
+                .oneshot(upload_req(&[PNG, &[i]].concat(), test::TOKEN))
+                .await
+                .unwrap();
+            assert_eq!(res.status(), 202);
+            ids.push(json(res).await["id"].as_i64().unwrap());
+        }
+        for id in ids {
+            let r = wait_done(&state, id).await;
+            assert_eq!(r["status"], "done", "{r}");
+        }
+    }
+
     #[tokio::test]
     async fn upload_requires_token() {
         let (state, _dir) = test::state(vec![Ok(fake::coffee())]).await;

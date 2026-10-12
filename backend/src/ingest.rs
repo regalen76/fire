@@ -76,20 +76,26 @@ async fn process_inner(state: &AppState, receipt_id: i64) -> anyhow::Result<()> 
         .ok_or_else(|| anyhow::anyhow!("no LLM configured"))?;
     let conn = state.conn()?;
 
-    let mut rows = conn
-        .query(
-            "SELECT image, mime, created_at FROM receipts WHERE id = ?1",
-            [receipt_id],
+    // Scoped so the row and its statement are gone before the writes below: a
+    // live row keeps a read snapshot open, and upgrading it to a write fails at
+    // once (SQLITE_BUSY_SNAPSHOT) if another ingest committed in the meantime.
+    let (image, mime, created_at) = {
+        let mut rows = conn
+            .query(
+                "SELECT image, mime, created_at FROM receipts WHERE id = ?1",
+                [receipt_id],
+            )
+            .await?;
+        let row = rows
+            .next()
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("receipt {receipt_id} not found"))?;
+        (
+            row.get::<Vec<u8>>(0)?,
+            row.get::<String>(1)?,
+            row.get::<String>(2)?,
         )
-        .await?;
-    let row = rows
-        .next()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("receipt {receipt_id} not found"))?;
-    let image: Vec<u8> = row.get(0)?;
-    let mime: String = row.get(1)?;
-    let created_at: String = row.get(2)?;
-    drop(rows);
+    };
 
     let uploaded_local =
         DateTime::parse_from_rfc3339(&created_at)?.with_timezone(&state.cfg.utc_offset);

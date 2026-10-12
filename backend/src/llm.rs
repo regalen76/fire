@@ -97,6 +97,22 @@ pub struct ExtractedItem {
 }
 
 impl Extraction {
+    /// What a reply for a random screenshot is reduced to.
+    pub fn not_a_receipt() -> Self {
+        Extraction {
+            is_receipt: false,
+            direction: Direction::Out,
+            merchant: String::new(),
+            occurred_at: None,
+            currency: String::new(),
+            total: "0".into(),
+            base_currency_total: None,
+            items: Vec::new(),
+            category: "other".into(),
+            payment_method: None,
+        }
+    }
+
     /// Checks what the schema can't express. Errors are fed back to the model on retry.
     pub fn validate(&self) -> Result<(), String> {
         if !self.is_receipt {
@@ -294,9 +310,25 @@ pub fn parse_reply(raw: &str) -> Result<Extraction, String> {
         .and_then(|s| s.strip_suffix("```"))
         .unwrap_or(trimmed)
         .trim();
-    let extraction: Extraction = serde_json::from_str(body).map_err(|e| e.to_string())?;
+    let extraction: Extraction = match serde_json::from_str(body) {
+        Ok(e) => e,
+        // Providers that don't enforce the schema fill a non-receipt's other
+        // fields with "", null or nothing at all; only isReceipt matters then.
+        Err(_) if says_not_a_receipt(body) => return Ok(Extraction::not_a_receipt()),
+        Err(e) => return Err(e.to_string()),
+    };
     extraction.validate()?;
     Ok(extraction)
+}
+
+/// True when the reply clearly says `"isReceipt": false`, even if the rest of it
+/// isn't valid JSON.
+fn says_not_a_receipt(body: &str) -> bool {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        return v.get("isReceipt") == Some(&serde_json::Value::Bool(false));
+    }
+    let compact: String = body.chars().filter(|c| !c.is_whitespace()).collect();
+    compact.contains("\"isReceipt\":false")
 }
 
 fn system_prompt(ctx: &PromptContext) -> String {
@@ -311,7 +343,7 @@ fn system_prompt(ctx: &PromptContext) -> String {
 The screenshot is one of:
 - a purchase receipt, bill, invoice or payment confirmation (QRIS, e-wallet, card, PayPal);
 - a bank or e-wallet transfer confirmation (e.g. "Transfer Berhasil");
-- something else (chat, photo, home screen). Then set isReceipt to false and fill the other fields with placeholders.
+- something else (chat, notes, photo, home screen). Then set isReceipt to false, direction "out", merchant "", occurredAt null, currency "{default_currency}", total "0", baseCurrencyTotal null, items [], category "other" and paymentMethod null.
 
 The owner of the app is: {owner}.
 
@@ -471,6 +503,19 @@ mod tests {
         e.is_receipt = false;
         e.total = String::new();
         assert!(e.validate().is_ok());
+    }
+
+    #[test]
+    fn non_receipt_with_placeholder_garbage_is_accepted() {
+        // Seen from a real provider that ignores the schema's enums.
+        let empty_direction = r#"{"isReceipt": false, "direction": "", "merchant": "", "occurredAt": null,
+            "currency": "", "total": "", "baseCurrencyTotal": null, "items": [], "category": "", "paymentMethod": null}"#;
+        assert!(!parse_reply(empty_direction).unwrap().is_receipt);
+        let missing_value = "{\n  \"isReceipt\": false,\n  \"direction\": ,\n}";
+        assert!(!parse_reply(missing_value).unwrap().is_receipt);
+        // A real receipt with a bad direction is still an error.
+        let bad = empty_direction.replace("false", "true");
+        assert!(parse_reply(&bad).is_err());
     }
 
     #[test]
