@@ -2,7 +2,7 @@
 
 A personal finance app built around one gesture: **double-tap the back of the iPhone** while a bill, receipt or payment confirmation is on screen. Fire saves the merchant, line items, total and category, and the web app turns them into a financial report.
 
-> Status: **backend built** (ingest pipeline, storage, every API route below). The React app is still a single overview card. Next: port the Dashboard, Transactions and Receipts screens from the prototype, then test real receipts against `glm-5.3-flash`.
+> Status: **backend and web app built.** Every API route below is live, and the Dashboard, Transactions, Receipts, transaction drawer and Add Transaction screens run on real data. `glm-5.3-flash` has been checked end-to-end on synthetic screenshots (IDR receipt, PayPal USD, incoming BCA transfer, non-receipt). Next: run it on 10–20 real screenshots (open question 1).
 
 ## Decisions so far
 
@@ -67,6 +67,7 @@ Implementation notes:
 - The model **must accept image input** (vision). The image goes in as an `image_url` content part holding a `data:image/png;base64,…` URL. **Starting model: `glm-5.3-flash`** (natively multimodal and available on the user's plan). Plain `glm-5.3` is text-only, so don't use it here. Vision models such as Qwen-VL are also available. Compare a few on real receipts, then keep the best.
 - The output is constrained with `response_format: {type: "json_schema", strict: true}`. Not every OpenAI-compatible provider honours that, so the backend always validates the reply with serde anyway. If validation fails, it retries once with the error appended and then marks the receipt `failed`. `FIRE_LLM_JSON_MODE=json_object` falls back to plain JSON mode for providers without schema support.
 - **Client library (proposed): [`async-openai`](https://crates.io/crates/async-openai)** with a custom `api_base`, behind our own `Extractor` trait (`fn extract(&self, image: &[u8], mime: &str) -> Result<Extraction>`). It is a typed client for exactly this API with no extra layers, and it allows a fake extractor in tests. [Rig](https://rig.rs) is a reasonable alternative and becomes the better fit if Fire later grows agent features, such as a "chat with your spending" assistant with tools over the DB. For one image-in, JSON-out call it adds abstraction and a fast-moving API without much benefit. Because of the trait, switching later only touches `llm.rs`.
+- **Provider quirks seen with `glm-5.3-flash`:** it sometimes wraps the JSON in ```json fences and does not enforce the schema's enums (a non-receipt came back with `"direction": ""`). The parser strips fences, and any reply that says `isReceipt: false` is treated as a non-receipt whatever the other fields hold.
 - `category` is an **enum** in the schema (see [Categories](#categories)), so the model cannot invent new ones.
 - Keep the raw model JSON on the receipt row. A bad extraction can then be debugged or re-run without re-sending the image.
 - If the image isn't a bill or transfer (a random screenshot), the model returns `isReceipt: false` and the receipt is marked `rejected`.
@@ -121,16 +122,16 @@ settings          (key TEXT PRIMARY KEY, value TEXT)                  -- e.g. mo
 
 Built with the Vision Finance design system in `Design/`. The click-through prototype in `Design/ui_kits/finance-web/` defines the screens to build:
 
-| Screen | Content | Main API |
-|---|---|---|
-| Dashboard | KPI stat cards (month net, month income, month spending, receipts scanned), welcome card, monthly budget gauge, cash-flow line chart, spending-by-category bars, recent transactions. The "balances by account" card is left out until accounts exist. | `GET /api/summary`, `/api/cashflow`, `/api/transactions?limit=5` |
-| Transactions | Table filterable by All / Income / Outcome and by category | `GET /api/transactions` |
-| Accounts | **Deferred** (no accounts yet). The sidebar item is hidden. | |
-| Receipts | Processing queue (live), scanned history, "How it works" | `GET /api/receipts` |
-| Monthly budget card (on Dashboard) | Gauge of this month's spending (base currency, `out` only) against the budget. With no budget set it shows "No budget set" and a SET BUDGET button. Editing happens inline in the card. | `GET/PUT /api/settings/budget` |
-| Transaction drawer | Detail with items read from the receipt, original screenshot, edit category/direction, delete | `GET/PATCH/DELETE /api/transactions/:id` |
-| Add transaction | Manual entry (mainly income without a screenshot) | `POST /api/transactions` |
-| Shell | Sidebar + header as in the prototype, but with no sign-in screen and no user/profile items | |
+| Screen | Content | Main API | Status |
+|---|---|---|---|
+| Dashboard | KPI stat cards (month net, month income, month spending, receipts scanned), welcome card, monthly budget gauge, cash-flow line chart, spending-by-category bars, recent transactions. The "balances by account" card is left out until accounts exist. | `GET /api/summary`, `/api/cashflow`, `/api/transactions?limit=5` | built |
+| Transactions | Table filterable by All / Income / Outcome and by category | `GET /api/transactions` | built |
+| Accounts | **Deferred** (no accounts yet). The sidebar item is hidden. | | deferred |
+| Receipts | Processing queue (live), scanned history, "How it works" | `GET /api/receipts` | built |
+| Monthly budget card (on Dashboard) | Gauge of this month's spending (base currency, `out` only) against the budget. With no budget set it shows "No budget set" and a SET BUDGET button. Editing happens inline in the card. | `GET/PUT /api/settings/budget` | built |
+| Transaction drawer | Detail with items read from the receipt, original screenshot, edit category/direction, delete | `GET/PATCH/DELETE /api/transactions/:id` | built |
+| Add transaction | Manual entry (mainly income without a screenshot) | `POST /api/transactions` | built |
+| Shell | Sidebar + header as in the prototype, but with no sign-in screen and no user/profile items | | built |
 
 ## Categories
 
@@ -239,6 +240,19 @@ Backend layout (`backend/src/`):
 | `money.rs` | Decimal strings (incl. `Rp 1.250.000,50`) → minor units |
 | `store.rs` | Transaction rows and shared queries |
 | `routes/` | `receipts`, `transactions`, `reports` (summary, cashflow, categories), `settings` |
+
+Frontend layout (`frontend/src/`):
+
+| File | What |
+|---|---|
+| `App.tsx` | Page state (persisted), drawers, polling of `processing` receipts for the nav badge and live refresh |
+| `Shell.tsx` | Sidebar + PageHeader + footer; on phones the sidebar becomes a drawer |
+| `screens/` | `Dashboard`, `Transactions`, `Receipts` |
+| `TransactionDrawer.tsx`, `AddTransaction.tsx`, `Drawer.tsx` | Detail/edit drawer, manual entry form, shared slide-in panel |
+| `api.ts` | Typed fetch helpers for every route |
+| `data.tsx` | Categories + base currency (fetched once), refresh signal, `useAsync` |
+| `format.ts` | Money, dates, chart scaling |
+| `ui.tsx` | Pieces the Design system lacks: loading/empty/error states, Select, Segmented, Chip, ConfirmDelete, IndeterminateBar |
 
 Tests use a temp-file database, `FakeExtractor` and `FakeFx` (1 USD = 16,000 IDR), so they never touch the network.
 

@@ -1,2 +1,50 @@
 html, body, #root { min-height: 100%; margin: 0; }
-body { color: var(--white); font-family: var(--font-sans); }
+body { color: var(--text-primary); font-family: var(--font-sans); }
+*, *::before, *::after { box-sizing: border-box; }
+
+/* Shell: sidebar floats 10px from the edge, content starts 24px to its right. */
+.fire-shell { display: flex; gap: var(--gutter); padding: var(--sidebar-inset); min-height: 100vh; }
+.fire-sidebar { position: sticky; top: var(--sidebar-inset); height: calc(100vh - 2 * var(--sidebar-inset)); flex-shrink: 0; }
+.fire-main { flex: 1; min-width: 0; padding: 12px 12px 24px 0; display: flex; flex-direction: column; gap: var(--gutter); }
+.fire-footer { margin-top: auto; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; font-family: var(--font-alt); font-size: 14px; line-height: 1.5; color: var(--text-primary); }
+.fire-footer a { color: var(--text-primary); }
+.fire-footer a:hover { color: var(--text-primary); filter: brightness(1.12); }
+
+/* Phone: the sidebar becomes a drawer opened from the header. */
+.fire-menu-backdrop { position: fixed; inset: 0; z-index: 30; background: color-mix(in srgb, var(--navy-950) 55%, transparent); }
+.fire-menu { position: absolute; top: var(--sidebar-inset); bottom: var(--sidebar-inset); left: var(--sidebar-inset); }
+.fire-menu-button { position: relative; flex-shrink: 0; margin-top: 12px; width: 37px; height: 37px; border: none; border-radius: var(--radius-button); background: var(--surface-ghost); color: var(--text-primary); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; }
+.fire-menu-dot { position: absolute; top: 6px; right: 6px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+
+/* Card grids, as in the prototype; they stack on narrow screens. */
+.fire-grid { display: grid; gap: var(--gutter); align-items: start; }
+.fire-stats { display: grid; gap: var(--gutter); grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); }
+.fire-grid--welcome { grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr); align-items: stretch; }
+.fire-grid--wide { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
+.fire-grid--receipts { grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); }
+@media (max-width: 1100px) {
+  .fire-grid--welcome, .fire-grid--wide, .fire-grid--receipts { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .fire-shell { gap: 0; }
+  .fire-main { padding: 6px 6px 16px; gap: 16px; }
+  .fire-grid, .fire-stats { gap: 16px; }
+  .fire-stats { grid-template-columns: minmax(0, 1fr); }
+}
+
+.fire-select option { background: var(--navy-800); color: var(--text-primary); }
+.fire-chip:hover { filter: brightness(1.12); }
+.fire-row { cursor: pointer; transition: background var(--dur-base) var(--ease-out); }
+.fire-row:hover { background: var(--surface-ghost); }
+.fire-row:focus-visible, .fire-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type='datetime-local']::-webkit-calendar-picker-indicator { filter: invert(1); opacity: 0.6; }
+
+/* Design workarounds (Design/ is generated, so they live here):
+   1. The Material glyphs in icon-data.js (Delete, Domain, Edit, MoreHoriz, MoreVert,
+      PriorityHigh, TagFaces) start with a full 24×24 frame rect filled with
+      currentColor, which paints a solid square over the glyph. Hide that rect. */
+svg > path:first-child[d='M 0 0 L 24 0 L 24 24 L 0 24 L 0 0 Z'] { display: none; }
+/* 2. LineChart's y-axis label overlay stops 40px short of the chart (bottom: 40)
+      but positions labels as a percentage of the full height, so they drift away
+      from their gridlines. Stretch the overlay to the full height. */
+.fire-linechart > div > div:nth-of-type(1) { bottom: 0 !important; }

@@ -50,6 +50,9 @@ Before finishing a task, run the test/typecheck/build commands for every side yo
 - Look: cards are glass gradients with no borders and no shadows, radius tokens `--radius-card` 20, `--radius-input`/`--radius-nav` 15, `--radius-button` 12, `--radius-sm` 8 (chips). Dividers are 0.5px `var(--navy-400)`. The sidebar floats 10px from the edge, 264px wide, collapsing to 88px.
 - Copy rules from `Design/readme.md`: Title Case card titles, UPPERCASE buttons/overlines/table headers, signed amounts (`+$2500` green, `-$2500` muted), long-form dates ("27 March 2020, at 12:30 PM"), no emoji.
 - Icons: `<Icon name="…">` from `@design/components/icons/Icon`. Only the 34 names in `Icon.d.ts` exist.
+- Shared frontend pieces: fetch through `api.ts`; get categories, base currency and the refresh signal from `data.tsx` (`useCategories`, `useBaseCurrency`, `useRefresh`, `useAsync`); call `refresh()` after any write so every screen re-fetches. Small widgets the Design system lacks live in `ui.tsx`. Timestamps without an offset are the owner's wall-clock time: format them with `format.ts`, never `new Date(str)`.
+- Every screen has loading, empty and error states, and must work at 390px wide (phone: sidebar drawer, tables become lists) with no horizontal page scroll.
+- Design bugs are worked around in `frontend/src/index.css` (Material icons painting a solid square, LineChart y-labels misaligned). Remove a workaround once `Design/` is regenerated with the fix.
 - `Design/` is generated; don't edit it unless asked. `src/design-shims.d.ts` bridges its pre-React-19 JSX types.
 
 ## Backend rules
