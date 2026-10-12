@@ -82,9 +82,8 @@ fn app(state: AppState) -> Router {
     let mut router = Router::new().nest("/api", api);
     if let Some(dir) = state.cfg.static_dir.clone() {
         // Built frontend; unknown paths fall back to index.html for client routing.
-        router = router.fallback_service(
-            ServeDir::new(&dir).not_found_service(ServeFile::new(dir.join("index.html"))),
-        );
+        router = router
+            .fallback_service(ServeDir::new(&dir).fallback(ServeFile::new(dir.join("index.html"))));
     }
     router.with_state(state).layer(TraceLayer::new_for_http())
 }
@@ -157,6 +156,32 @@ mod tests {
         assert!(res.status().is_success());
         let body = res.into_body().collect().await.unwrap().to_bytes();
         assert_eq!(&body[..], br#"{"status":"ok"}"#);
+    }
+
+    #[tokio::test]
+    async fn serves_the_built_frontend() {
+        let (mut state, dir) = state::test::state(vec![Ok(llm::fake::coffee())]).await;
+        let dist = dir.path().join("dist");
+        std::fs::create_dir_all(dist.join("assets")).unwrap();
+        std::fs::write(dist.join("index.html"), "<html>fire</html>").unwrap();
+        std::fs::write(dist.join("assets/app.js"), "console.log(1)").unwrap();
+        let mut cfg = (*state.cfg).clone();
+        cfg.static_dir = Some(dist);
+        state.cfg = Arc::new(cfg);
+
+        let get = |path: &str| {
+            app(state.clone()).oneshot(Request::get(path).body(Body::empty()).unwrap())
+        };
+        let res = get("/").await.unwrap();
+        assert_eq!(res.status(), 200);
+        let body = res.into_body().collect().await.unwrap().to_bytes();
+        assert_eq!(&body[..], b"<html>fire</html>");
+        assert_eq!(get("/assets/app.js").await.unwrap().status(), 200);
+        // Unknown paths get the app with 200, so a reload never shows an error page.
+        assert_eq!(get("/transactions").await.unwrap().status(), 200);
+        // The API keeps its JSON 404 and is not swallowed by the fallback.
+        assert_eq!(get("/api/nope").await.unwrap().status(), 404);
+        assert!(get("/api/health").await.unwrap().status().is_success());
     }
 
     #[tokio::test]
