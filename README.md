@@ -69,6 +69,10 @@ Implementation notes:
 - `category` is an **enum** in the schema (see [Categories](#categories)), so the model cannot invent new ones.
 - Keep the raw model JSON on the receipt row. A bad extraction can then be debugged or re-run without re-sending the image.
 - If the image isn't a bill or transfer (a random screenshot), the model returns `isReceipt: false` and the receipt is marked `rejected`.
+- **Duplicates are rejected**, and nothing is saved twice:
+  1. *Same image.* The SHA-256 of the upload matches an earlier receipt. This is rejected in the upload request itself (`409`, the Shortcut shows "Already saved"), with no LLM call.
+  2. *Same bill, different screenshot.* After extraction, a transaction already exists with the same direction, currency and amount, a similar merchant, and a time within 10 minutes. The receipt is marked `duplicate` and points at the existing transaction. No new transaction is created.
+  Rejected and duplicate receipts still show in the Receipts screen with the reason, so a false match can be noticed (a "SAVE ANYWAY" action can come later if needed).
 - **Indonesian number formats.** `Rp 25.000` means twenty-five thousand (`.` separates thousands, `,` marks decimals). The prompt says so explicitly, and the model returns amounts as decimal strings (`"25000.00"`) that the backend converts to integers. The model never does that maths itself.
 
 ### Expenses, income and transfers
@@ -101,7 +105,7 @@ Planned schema:
 
 ```sql
 categories        (id TEXT PRIMARY KEY, label, icon, kind)            -- kind: expense|income|internal
-receipts          (id, status, image BLOB, mime, image_sha256 UNIQUE, -- status: processing|done|failed|rejected
+receipts          (id, status, image BLOB, mime, image_sha256 UNIQUE, duplicate_of NULL, -- status: processing|done|failed|rejected|duplicate
                    llm_model, llm_json, error, created_at, processed_at)
 transactions      (id, receipt_id NULL, category_id, direction,       -- direction: in|out|internal
                    merchant, occurred_at, amount_minor, currency,
@@ -230,5 +234,4 @@ Design/     Vision Finance design system (generated; source of truth for UI)
 ## Open questions
 
 1. **LLM model.** Start with `glm-5.3-flash`. Compare it with the Qwen vision models on 10–20 real receipts and transfers (merchant, total, direction, category, IDR amounts parsed correctly?) before settling on one.
-2. **Duplicates.** Tapping twice on the same bill should not create two transactions. Plan: reject an identical image (`image_sha256`). If a different screenshot has the same merchant, total and time within a few minutes, flag it as a possible duplicate instead of saving it silently.
-3. **Monthly budget.** The dashboard gauge needs a budget. Start with one env var or settings row in IDR, or drop the card?
+2. **Monthly budget.** The prototype dashboard has a "Monthly budget" card: a semicircle meter showing how much of a monthly spending limit is used (e.g. "Rp 3.100.000 of Rp 5.000.000, 62%"). Keep it with one IDR budget setting, or drop the card?
